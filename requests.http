@@ -1,0 +1,210 @@
+# Przed serią zrzutów: npm run seed, potem npm start.
+# Zacznij od sekcji LOGOWANIE: tokeny zapisują się same do zmiennych {{jan}}, {{anna}}, {{admin}}.
+@base = http://localhost:3000
+
+### ===================== LOGOWANIE (odpal najpierw wszystkie trzy) =====================
+
+### Login: Jan (USER, id 2)
+POST {{base}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "jan.kowalski@example.com", "password": "jan-password-123" }
+
+> {% client.global.set("jan", response.body.accessToken); %}
+
+### Login: Anna (USER, id 3)
+POST {{base}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "anna.nowak@example.com", "password": "anna-password-123" }
+
+> {% client.global.set("anna", response.body.accessToken); %}
+
+### Login: admin (ADMIN, id 1)
+POST {{base}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "admin@example.com", "password": "admin-password-123" }
+
+> {% client.global.set("admin", response.body.accessToken); %}
+
+### ===================== Zadanie 1: rejestracja =====================
+
+### Rejestracja (201), email normalizowany do małych liter
+POST {{base}}/api/auth/register
+Content-Type: application/json
+
+{ "email": "Piotr.Nowy@Example.com", "password": "bardzo-dlugie-haslo" }
+
+### Próba rejestracji z rolą ADMIN (400)
+POST {{base}}/api/auth/register
+Content-Type: application/json
+
+{ "email": "haker@example.com", "password": "bardzo-dlugie-haslo", "role": "ADMIN" }
+
+### Za krótkie hasło (400)
+POST {{base}}/api/auth/register
+Content-Type: application/json
+
+{ "email": "krotkie@example.com", "password": "krotkie" }
+
+### Duplikat emaila różniący się wielkością liter (409 EMAIL_TAKEN)
+POST {{base}}/api/auth/register
+Content-Type: application/json
+
+{ "email": "PIOTR.NOWY@example.com", "password": "bardzo-dlugie-haslo" }
+
+### ===================== Zadanie 2: logowanie i JWT =====================
+
+### Zły email (401)
+POST {{base}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "nikt@example.com", "password": "jan-password-123" }
+
+### Złe hasło (401, identyczna odpowiedź)
+POST {{base}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "jan.kowalski@example.com", "password": "zle-haslo-123" }
+
+### Dane zalogowanego użytkownika (200)
+GET {{base}}/api/auth/me
+Authorization: Bearer {{jan}}
+
+### ===================== Zadanie 3: przypadki 401 =====================
+
+### Brak nagłówka (401)
+GET {{base}}/api/rooms
+
+### Zły format: Basic (401)
+GET {{base}}/api/rooms
+Authorization: Basic YWRtaW46YWRtaW4=
+
+### Zły format: samo Bearer bez tokenu (401)
+GET {{base}}/api/rooms
+Authorization: Bearer
+
+### Zły podpis: wklej token z: node scripts/tamper-token.js <token Jana> (401 Invalid token)
+GET {{base}}/api/rooms
+Authorization: Bearer WKLEJ_TOKEN_ZE_ZLYM_PODPISEM
+
+### Zmieniony payload role -> ADMIN, oryginalny podpis (401 Invalid token)
+POST {{base}}/api/buildings
+Authorization: Bearer WKLEJ_TOKEN_ZE_ZMIENIONYM_PAYLOADEM
+Content-Type: application/json
+
+{ "name": "Hack", "address": "ul. Hack 1" }
+
+### Wygasły token: uruchom server z JWT_EXPIRES_IN=10s, zaloguj się, odczekaj 10 s (401 Token expired)
+GET {{base}}/api/auth/me
+Authorization: Bearer {{jan}}
+
+### ===================== Zadanie 3: rezerwacje użytkownika =====================
+
+### userId / reservedBy w body (400)
+POST {{base}}/api/reservations
+Authorization: Bearer {{jan}}
+Content-Type: application/json
+
+{ "roomId": 1, "participants": 5, "startTime": "2026-11-15T10:00:00Z", "endTime": "2026-11-15T11:00:00Z", "userId": 3 }
+
+### Rezerwacja Anny (201): właściciel z tokenu, w odpowiedzi user { id, email }
+POST {{base}}/api/reservations
+Authorization: Bearer {{anna}}
+Content-Type: application/json
+
+{ "roomId": 1, "participants": 5, "startTime": "2026-11-15T10:00:00Z", "endTime": "2026-11-15T11:00:00Z" }
+
+> {% client.global.set("annaRes", response.body.id); %}
+
+### ===================== Zadanie 4: role =====================
+
+### USER tworzy budynek (403)
+POST {{base}}/api/buildings
+Authorization: Bearer {{jan}}
+Content-Type: application/json
+
+{ "name": "Budynek X", "address": "ul. X 1, Kraków" }
+
+### ADMIN tworzy budynek (201)
+POST {{base}}/api/buildings
+Authorization: Bearer {{admin}}
+Content-Type: application/json
+
+{ "name": "Budynek X", "address": "ul. X 1, Kraków" }
+
+### USER tworzy salę (403)
+POST {{base}}/api/rooms
+Authorization: Bearer {{jan}}
+Content-Type: application/json
+
+{ "buildingId": 3, "name": "X1", "capacity": 5 }
+
+### ADMIN tworzy salę (201)
+POST {{base}}/api/rooms
+Authorization: Bearer {{admin}}
+Content-Type: application/json
+
+{ "buildingId": 3, "name": "X1", "capacity": 5 }
+
+### USER czyta budynki i sale (200)
+GET {{base}}/api/buildings
+Authorization: Bearer {{jan}}
+
+### ===================== Zadanie 4: ownership =====================
+
+### Jan widzi tylko swoje rezerwacje (200)
+GET {{base}}/api/reservations
+Authorization: Bearer {{jan}}
+
+### Jan, filtr innej sali: dalej tylko swoje (tu pusto)
+GET {{base}}/api/reservations?roomId=2
+Authorization: Bearer {{jan}}
+
+### Jan z ?userId= (403, filtr tylko dla ADMINa)
+GET {{base}}/api/reservations?userId=3
+Authorization: Bearer {{jan}}
+
+### ADMIN widzi wszystkie (200)
+GET {{base}}/api/reservations
+Authorization: Bearer {{admin}}
+
+### ADMIN z filtrem userId + pagination (200)
+GET {{base}}/api/reservations?userId=3&limit=1&page=2&sort=-startTime
+Authorization: Bearer {{admin}}
+
+### Rezerwacja Anny: właścicielka (200)
+GET {{base}}/api/reservations/{{annaRes}}
+Authorization: Bearer {{anna}}
+
+### Rezerwacja Anny: obcy USER Jan (404)
+GET {{base}}/api/reservations/{{annaRes}}
+Authorization: Bearer {{jan}}
+
+### Rezerwacja Anny: ADMIN (200)
+GET {{base}}/api/reservations/{{annaRes}}
+Authorization: Bearer {{admin}}
+
+### Anulowanie rezerwacji Anny przez Jana (404)
+PATCH {{base}}/api/reservations/{{annaRes}}/cancel
+Authorization: Bearer {{jan}}
+
+### Anulowanie przez właścicielkę (200)
+PATCH {{base}}/api/reservations/{{annaRes}}/cancel
+Authorization: Bearer {{anna}}
+
+### Anulowanie przez ADMINa (200, idempotentne)
+PATCH {{base}}/api/reservations/{{annaRes}}/cancel
+Authorization: Bearer {{admin}}
+
+### Reguły obowiązują ADMINa: anulowanie rozpoczętej rezerwacji #2 (409)
+PATCH {{base}}/api/reservations/2/cancel
+Authorization: Bearer {{admin}}
+
+### Reguły obowiązują ADMINa: nakładająca się rezerwacja (409)
+POST {{base}}/api/reservations
+Authorization: Bearer {{admin}}
+Content-Type: application/json
+
+{ "roomId": 1, "participants": 5, "startTime": "2026-11-10T11:00:00Z", "endTime": "2026-11-10T12:30:00Z" }

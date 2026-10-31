@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:16
+    container_name: roombooking-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-roombooking}
+    ports:
+      # 5433 na komputerze, bo 5432 może zajmować lokalnie zainstalowany PostgreSQL
+      - "5433:5432"
+    volumes:
+      - roombooking-pgdata:/var/lib/postgresql/data
+
+volumes:
+  roombooking-pgdata:
