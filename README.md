@@ -1,21 +1,31 @@
-# Room Booking API (Zadanie 04)
+# Room Booking API
 
-REST API do rezerwacji sal: Node.js, Express 5, Zod, PostgreSQL 16 (Docker), Knex, bcryptjs, JWT, Swagger UI.
+[![CI](https://github.com/katassyn/paiv2_lab5/actions/workflows/ci.yml/badge.svg)](https://github.com/katassyn/paiv2_lab5/actions/workflows/ci.yml)
 
-## Uruchomienie od zera
+REST API do rezerwacji sal w budynkach (laboratoria ZTPAI, zestawy 01 do 05).
+Node.js 22, Express 5, Zod, PostgreSQL 16, Knex, JWT, Swagger UI, Jest, Supertest, Docker Compose, GitHub Actions.
+
+## Uruchomienie od zera (Docker)
+
+Wymagany tylko Docker (Docker Desktop).
 
 ```bash
-npm install
-copy .env.example .env      # Windows (Linux/macOS: cp); uzupełnij DATABASE_URL i wygeneruj JWT_SECRET
-npm run db:up               # PostgreSQL w Dockerze, port 5433
-npm run migrate
-npm run seed
-npm start                   # http://localhost:3000, Swagger: http://localhost:3000/api/docs
+git clone https://github.com/katassyn/paiv2_lab5.git
+cd paiv2_lab5
+cp .env.example .env          # Windows PowerShell: copy .env.example .env
+docker compose up --build
 ```
 
-Losowy sekret: `node -e "console.log(require('node:crypto').randomBytes(48).toString('base64'))"`
+Gotowe:
 
-## Konta demo (po `npm run seed`)
+- API: http://localhost:3000/api
+- Swagger UI: http://localhost:3000/api/docs
+
+Kontener `api` przy starcie sam wykonuje migracje bazy. Konta demo (ADMIN i dwóch użytkowników) dodaje seed, uruchamiany w działającym kontenerze:
+
+```bash
+docker compose exec api npx knex seed:run
+```
 
 | Email | Hasło | Rola |
 | --- | --- | --- |
@@ -23,32 +33,54 @@ Losowy sekret: `node -e "console.log(require('node:crypto').randomBytes(48).toSt
 | jan.kowalski@example.com | jan-password-123 | USER |
 | anna.nowak@example.com | anna-password-123 | USER |
 
-To hasła demo do lokalnego developmentu. Konto ADMIN powstaje tylko w seedzie, rejestracja zawsze daje USER.
+Zatrzymanie: `docker compose down` (dane zostają w volume), `docker compose down -v` (razem z danymi).
+Aplikacja obsługuje `SIGTERM` (graceful shutdown), więc zatrzymanie trwa chwilę, a nie 10 sekund.
+
+Baza z Compose jest wystawiona na porcie **5433**. Jeżeli port jest zajęty (np. przez kontener z wcześniejszych zestawów), zatrzymaj tamten kontener.
+
+## Testy
+
+```bash
+npm install
+docker compose up -d db       # baza (tworzy też pustą bazę roombooking_test)
+npm test                      # unit + integration
+npm run test:unit             # same unit testy (nie potrzebują bazy)
+npm run test:integration      # testy API na bazie testowej
+```
+
+- **Unit** (`tests/unit`): service rezerwacji z repositories in-memory i wstrzykniętym czasem. Bez bazy danych.
+- **Integration** (`tests/integration`): Supertest na `createApp()` (bez uruchamiania servera na porcie), osobna baza `roombooking_test`. Schemat tworzą migracje w `beforeAll`, stan jest czyszczony przed każdym testem.
+
+Testy integracyjne zawsze używają bazy z `TEST_DATABASE_URL`, nigdy developerskiej (`tests/setupEnv.js`).
+
+## Eventy i audit log
+
+Service rezerwacji publikuje eventy po zatwierdzeniu transakcji: `reservation.created` i `reservation.cancelled`.
+Nieudana operacja (np. 409) i ponowne anulowanie nie publikują eventu.
+
+- event bus: `src/events/eventBus.js` (EventEmitter z izolacją błędów listenerów),
+- listener audit logu: zapis do tabeli `audit_log` (payload jako `jsonb`),
+- listener powiadomień: gdy ADMIN anuluje cudzą rezerwację, w logach pojawia się `[notification] to: <email właściciela> ...`,
+- `GET /api/admin/audit-log?eventType=&page=&limit=` (tylko ADMIN), najnowsze wpisy pierwsze.
+
+## Uruchomienie bez Dockera dla API
+
+```bash
+npm install
+docker compose up -d db
+npm run migrate
+npm run seed
+npm run dev
+```
 
 ## Konfiguracja
 
-Wszystkie zmienne czyta i waliduje `src/config/index.js` (Zod). Błędna albo brakująca zmienna zatrzymuje start aplikacji.
+Wszystkie zmienne są w `.env` (wzór: `.env.example`, plik `.env` jest w `.gitignore`). Zmienne waliduje `src/config/index.js`: błędna konfiguracja zatrzymuje start aplikacji.
 
-| Zmienna | Opis | Domyślnie |
-| --- | --- | --- |
-| DATABASE_URL | `postgres://...` | wymagana |
-| JWT_SECRET | min. 32 znaki | wymagana |
-| JWT_EXPIRES_IN | czas życia tokenu, np. `15m`, `10s` | 15m |
-| PORT | port HTTP | 3000 |
-| REPOSITORY | `knex` albo `memory` | knex |
+## CI
 
-## Role
+`.github/workflows/ci.yml` przy każdym push do `main` i pull requeście:
 
-| Rola | Może |
-| --- | --- |
-| USER | przeglądać budynki i sale, tworzyć rezerwacje, przeglądać i anulować własne |
-| ADMIN | to co USER oraz tworzyć budynki i sale, przeglądać i anulować wszystkie rezerwacje |
-
-## Przydatne skrypty
-
-| Komenda | Co robi |
-| --- | --- |
-| `npm run db:psql` | psql w kontenerze |
-| `node scripts/tamper-token.js <token>` | token ze złym podpisem i ze zmienionym payloadem (testy 401) |
-| `npm run parallel-register` | 10 równoległych rejestracji tego samego emaila |
-| `npm run double-booking` | 10 równoległych identycznych rezerwacji |
+1. uruchamia `npm test` z PostgreSQL jako service,
+2. sprawdza, że obraz Docker się buduje,
+3. uruchamia całość od zera przez `docker compose up --build` i sprawdza API, seed i graceful shutdown.
