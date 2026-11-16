@@ -17,4 +17,4 @@ USER node
 EXPOSE 3000
 
 # Migracje przy starcie kontenera. exec: node zostaje procesem PID 1 i sam dostaje SIGTERM (graceful shutdown)
-CMD ["sh", "-c", "npx knex migrate:latest && exec node src/server.js"]
+CMD ["sh", "-c", "node_modules/.bin/knex migrate:latest && exec node src/server.js"]
