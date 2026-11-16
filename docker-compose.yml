@@ -1,16 +1,39 @@
+# Uruchomienie całości jedną komendą: docker compose up --build
+# Wartości ${...} pochodzą z pliku .env (wzór: .env.example). Żadnych sekretów w tym pliku.
+name: room-booking
+
 services:
   db:
-    image: postgres:16
-    container_name: roombooking-db
+    image: postgres:16-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-roombooking}
+      POSTGRES_USER: ${DB_USER:?ustaw DB_USER w .env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?ustaw DB_PASSWORD w .env}
+      POSTGRES_DB: ${DB_NAME:?ustaw DB_NAME w .env}
     ports:
-      # 5433 na komputerze, bo 5432 może zajmować lokalnie zainstalowany PostgreSQL
-      - "5433:5432"
+      - "5433:5432" # baza dostępna też z komputera (npm run dev, testy)
     volumes:
-      - roombooking-pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro # baza do testów
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # w sieci Compose baza jest pod nazwą usługi "db", a nie localhost
+      DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+      JWT_SECRET: ${JWT_SECRET:?ustaw JWT_SECRET w .env}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy # api startuje dopiero, gdy PostgreSQL przyjmuje połączenia
 
 volumes:
-  roombooking-pgdata:
+  pgdata:
