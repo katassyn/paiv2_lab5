@@ -6,7 +6,7 @@ const BCRYPT_ROUNDS = 12;
 
 exports.seed = async function (knex) {
   // czyszczenie tylko raz, na początku: CASCADE czyści też tabele zależne
-  await knex.raw('TRUNCATE reservations, rooms, buildings, users RESTART IDENTITY CASCADE');
+  await knex.raw('TRUNCATE audit_log, reservations, rooms, buildings, users RESTART IDENTITY CASCADE');
 
   const accounts = [
     { email: 'admin@example.com', password: 'admin-password-123', role: 'ADMIN' }, // id 1

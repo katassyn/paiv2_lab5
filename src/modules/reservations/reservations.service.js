@@ -1,4 +1,5 @@
 const { NotFoundError, ConflictError, ValidationError, ForbiddenError } = require('../../errors/AppError');
+const { noopEventBus } = require('../../events/eventBus');
 
 const MIN_DURATION_MS = 15 * 60 * 1000; // 15 minut
 const MAX_DURATION_MS = 8 * 60 * 60 * 1000; // 8 godzin
@@ -24,7 +25,7 @@ function assertCanAccess(reservation, currentUser) {
   }
 }
 
-function createReservationsService({ runInTransaction, now = () => new Date() }) {
+function createReservationsService({ runInTransaction, eventBus = noopEventBus, now = () => new Date() }) {
   async function createReservation(input, currentUser) {
     const start = new Date(input.startTime).getTime();
     const end = new Date(input.endTime).getTime();
@@ -49,7 +50,7 @@ function createReservationsService({ runInTransaction, now = () => new Date() })
     }
 
     // Sprawdzenie kolizji i zapis w JEDNEJ transakcji
-    return runInTransaction(async ({ rooms, reservations }) => {
+    const created = await runInTransaction(async ({ rooms, reservations }) => {
       // Blokada wiersza sali (SELECT ... FOR UPDATE): równoległe rezerwacje TEJ SAMEJ sali
       // czekają tu, aż poprzednia transakcja zrobi COMMIT. Inne sale nie są blokowane.
       await rooms.lockById(input.roomId);
@@ -83,6 +84,16 @@ function createReservationsService({ runInTransaction, now = () => new Date() })
         internalNote: 'created via API v2',
       });
     });
+
+    // Event dopiero PO COMMIT: nieudana operacja (wyjątek) nie dochodzi do tego miejsca.
+    eventBus.publish('reservation.created', {
+      reservationId: created.id,
+      roomId: created.roomId,
+      userId: created.userId,
+      startTime: new Date(created.startTime).toISOString(),
+      endTime: new Date(created.endTime).toISOString(),
+    });
+    return created;
   }
 
   async function listReservations(query, currentUser) {
@@ -114,12 +125,13 @@ function createReservationsService({ runInTransaction, now = () => new Date() })
   }
 
   async function cancelReservation(id, currentUser) {
-    return runInTransaction(async ({ reservations }) => {
+    let changed = false;
+    const result = await runInTransaction(async ({ reservations }) => {
       const reservation = await reservations.findById(id);
       assertCanAccess(reservation, currentUser);
       const target = 'CANCELLED';
 
-      // Idempotencja: ponowne anulowanie zwraca rezerwację bez zmian
+      // Idempotencja: ponowne anulowanie zwraca rezerwację bez zmian (i bez eventu)
       if (reservation.status === target) return reservation;
 
       if (!ALLOWED_TRANSITIONS[reservation.status].includes(target)) {
@@ -134,8 +146,19 @@ function createReservationsService({ runInTransaction, now = () => new Date() })
         throw new ConflictError('Reservation has already started', 'RESERVATION_ALREADY_STARTED');
       }
 
+      changed = true;
       return reservations.update(id, { status: target, cancelledAt: now() });
     });
+
+    if (changed) {
+      eventBus.publish('reservation.cancelled', {
+        reservationId: result.id,
+        roomId: result.roomId,
+        userId: result.userId,
+        cancelledBy: currentUser.id,
+      });
+    }
+    return result;
   }
 
   return { createReservation, listReservations, getReservation, cancelReservation };

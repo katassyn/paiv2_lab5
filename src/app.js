@@ -22,8 +22,13 @@ const { createReservationsService } = require('./modules/reservations/reservatio
 const { createReservationsController } = require('./modules/reservations/reservations.controller');
 const { createReservationsRouter } = require('./modules/reservations/reservations.routes');
 
+const { createAdminService } = require('./modules/admin/admin.service');
+const { createAdminController } = require('./modules/admin/admin.controller');
+const { createAdminRouter } = require('./modules/admin/admin.routes');
+const { noopEventBus } = require('./events/eventBus');
+
 // Buduje aplikację, ale jej NIE uruchamia (brak app.listen). Konfiguracja przychodzi z zewnątrz.
-function createApp({ config, runInTransaction, now = () => new Date() }) {
+function createApp({ config, runInTransaction, eventBus = noopEventBus, now = () => new Date() }) {
   const app = express();
 
   app.use(requestLogger); // pierwszy: mierzy czas całego requestu
@@ -38,7 +43,8 @@ function createApp({ config, runInTransaction, now = () => new Date() }) {
   });
   const buildingsService = createBuildingsService({ runInTransaction });
   const roomsService = createRoomsService({ runInTransaction });
-  const reservationsService = createReservationsService({ runInTransaction, now });
+  const reservationsService = createReservationsService({ runInTransaction, eventBus, now });
+  const adminService = createAdminService({ runInTransaction });
 
   // Publiczne: dokumentacja oraz /api/auth/register i /api/auth/login
   app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openapiDocument));
@@ -48,6 +54,7 @@ function createApp({ config, runInTransaction, now = () => new Date() }) {
   app.use('/api/buildings', requireAuth, createBuildingsRouter(createBuildingsController(buildingsService)));
   app.use('/api/rooms', requireAuth, createRoomsRouter(createRoomsController(roomsService)));
   app.use('/api/reservations', requireAuth, createReservationsRouter(createReservationsController(reservationsService)));
+  app.use('/api/admin', requireAuth, createAdminRouter(createAdminController(adminService)));
 
   app.use(notFound); // po wszystkich routes
   app.use(errorHandler); // zawsze ostatni

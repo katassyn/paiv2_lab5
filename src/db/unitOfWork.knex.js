@@ -2,6 +2,7 @@ const { createUsersRepository } = require('../modules/auth/users.repository.knex
 const { createBuildingsRepository } = require('../modules/buildings/buildings.repository.knex');
 const { createRoomsRepository } = require('../modules/rooms/rooms.repository.knex');
 const { createReservationsRepository } = require('../modules/reservations/reservations.repository.knex');
+const { createAuditLogRepository } = require('../modules/admin/auditLog.repository.knex');
 
 // db to pula połączeń albo obiekt transakcji (trx), oba mają to samo API.
 function createKnexRepositories(db) {
@@ -10,6 +11,7 @@ function createKnexRepositories(db) {
     buildings: createBuildingsRepository(db),
     rooms: createRoomsRepository(db),
     reservations: createReservationsRepository(db),
+    auditLog: createAuditLogRepository(db),
   };
 }
 

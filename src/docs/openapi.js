@@ -24,7 +24,7 @@ module.exports = {
   openapi: '3.0.3',
   info: {
     title: 'Room Booking API',
-    version: '4.0.0',
+    version: '5.0.0',
     description:
       'Rezerwacje sal w budynkach. Zaloguj się przez POST /api/auth/login, skopiuj accessToken i kliknij **Authorize**.\n\n' +
       'Konta demo (po `npm run seed`): `admin@example.com / admin-password-123` (ADMIN), ' +
@@ -35,6 +35,7 @@ module.exports = {
     { name: 'Buildings', description: 'Budynki (zapis tylko ADMIN)' },
     { name: 'Rooms', description: 'Sale (zapis tylko ADMIN)' },
     { name: 'Reservations', description: 'Rezerwacje (USER widzi tylko swoje, ADMIN wszystkie)' },
+    { name: 'Admin', description: 'Dziennik zdarzeń (tylko ADMIN)' },
   ],
   security: [{ bearerAuth: [] }], // domyślnie każdy endpoint wymaga tokenu
   components: {
@@ -324,6 +325,40 @@ module.exports = {
           400: R[400], 401: R[401],
           404: err('Rezerwacja nie istnieje albo należy do innego użytkownika (NOT_FOUND)'),
           409: err('Rezerwacja już się rozpoczęła (RESERVATION_ALREADY_STARTED)'),
+        },
+      },
+    },
+    '/api/admin/audit-log': {
+      get: {
+        tags: ['Admin'], summary: 'Dziennik zdarzeń (audit log), najnowsze pierwsze (tylko ADMIN)',
+        parameters: [
+          { name: 'eventType', in: 'query', schema: { type: 'string', enum: ['reservation.created', 'reservation.cancelled'] } },
+          { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+        ],
+        responses: {
+          200: ok('Strona wpisów audit logu', {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'integer', example: 2 },
+                    eventType: { type: 'string', example: 'reservation.cancelled' },
+                    payload: { type: 'object', example: { reservationId: 6, roomId: 1, userId: 2, cancelledBy: 1 } },
+                    createdAt: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+              meta: {
+                type: 'object',
+                properties: { page: { type: 'integer' }, limit: { type: 'integer' }, total: { type: 'integer' }, totalPages: { type: 'integer' } },
+              },
+            },
+          }),
+          400: R[400], 401: R[401], 403: R[403],
         },
       },
     },
