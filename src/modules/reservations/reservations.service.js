@@ -60,7 +60,7 @@ function createReservationsService({ runInTransaction, eventBus = noopEventBus, 
       if (!room) throw new NotFoundError('Room');
 
       // Pojemność sali -> 409
-      if (input.participants >= room.capacity) {
+      if (input.participants > room.capacity) {
         throw new ConflictError('Room capacity exceeded', 'ROOM_CAPACITY_EXCEEDED');
       }
 
