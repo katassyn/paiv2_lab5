@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Testy (unit + integration) i build obrazu
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: roombooking_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      # baza tylko na czas joba; to nie jest sekret
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/roombooking_test
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm test
+
+      - name: Obraz Docker się buduje
+        run: docker build -t room-booking-api .
+
+  compose:
+    name: Uruchomienie od zera (docker compose up --build)
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Konfiguracja jak w README
+        run: cp .env.example .env
+
+      - name: docker compose up --build
+        run: docker compose up -d --build --wait --wait-timeout 120
+
+      - name: docker compose ps
+        run: docker compose ps
+
+      - name: Logi API (migracje przy starcie)
+        run: docker compose logs api
+
+      - name: API i Swagger UI odpowiadają
+        run: |
+          curl -fsS --retry 15 --retry-connrefused --retry-delay 2 -o /dev/null -w "GET /api/docs/ -> %{http_code}\n" http://localhost:3000/api/docs/
+          curl -sS -w "\nGET /api/reservations (bez tokenu) -> %{http_code}\n" http://localhost:3000/api/reservations
+
+      - name: Seed z kontem ADMIN w działającym kontenerze
+        run: docker compose exec -T api npx knex seed:run
+
+      - name: Graceful shutdown (docker compose down nie czeka na SIGKILL)
+        run: |
+          start=$(date +%s)
+          docker compose stop api
+          echo "api zatrzymane po $(( $(date +%s) - start )) s"
+          docker compose logs --tail 5 api
+          docker compose down -v
